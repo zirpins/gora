@@ -54,4 +54,31 @@
     <field name="count"  family="p" qualifier="common:count"/>
   </class>
 
+  <keyspace name="Sensor" cluster="Gora Cassandra Test Cluster" host="localhost" replicationFactor="1"
+      replicationStrategy="org.apache.cassandra.locator.SimpleStrategy">
+      <family name="readings" />
+      <family name="params" type="super"/>
+      <family name="context" type="super"/>
+      <family name="events"  type="super"/>
+  </keyspace>
+
+  <class name="org.apache.gora.examples.generated.SensorData" keyspace="Sensor"
+      keyClass="org.apache.gora.examples.generated.SensorKey">
+      <field name="reading" family="readings" qualifier="dat" />
+      <!-- complex field types go into separate CFs -->
+      <field name="events" family="events" qualifier="evt" />
+      <field name="params" type="complex" family="params" qualifier="prm" />
+      <field name="context" family="context" qualifier="ctx"/>
+  </class>
+
+  <primaryKey name="org.apache.gora.examples.generated.SensorKey">
+      <partitionKey>
+          <field name="sensorId" type="UTF8Type" />
+          <field name="year" type="IntegerType" />
+      </partitionKey>
+      <clusterKey>
+          <field name="date" type="LongType" />
+      </clusterKey>
+  </primaryKey>
+  
 </gora-orm>

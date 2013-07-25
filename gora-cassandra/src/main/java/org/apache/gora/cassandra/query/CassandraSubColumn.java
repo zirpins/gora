@@ -19,62 +19,64 @@
 package org.apache.gora.cassandra.query;
 
 import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.Charset;
-import java.nio.charset.CharsetEncoder;
 
-import me.prettyprint.cassandra.serializers.FloatSerializer;
-import me.prettyprint.cassandra.serializers.DoubleSerializer;
-import me.prettyprint.cassandra.serializers.IntegerSerializer;
-import me.prettyprint.cassandra.serializers.LongSerializer;
-import me.prettyprint.cassandra.serializers.StringSerializer;
 import me.prettyprint.hector.api.beans.HColumn;
 
 import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
 import org.apache.avro.generic.GenericArray;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.util.Utf8;
 import org.apache.gora.cassandra.serializers.GenericArraySerializer;
 import org.apache.gora.cassandra.serializers.StatefulHashMapSerializer;
-import org.apache.gora.cassandra.serializers.TypeUtils;
 import org.apache.gora.cassandra.store.CassandraStore;
 import org.apache.gora.persistency.StatefulHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CassandraSubColumn extends CassandraColumn {
-  public static final Logger LOG = LoggerFactory.getLogger(CassandraSubColumn.class);
+/**
+ * Represents an abstract name/value pair. Column name types are generic. Values are atomic.
+ *
+ * @param CN
+ *          column name type
+ */
+public class CassandraSubColumn<CN> extends CassandraColumn<CN> {
+  private static final Logger LOG = LoggerFactory.getLogger(CassandraSubColumn.class);
 
-  private static final String ENCODING = "UTF-8";
-  
-  private static CharsetEncoder charsetEncoder = Charset.forName(ENCODING).newEncoder();;
+  // Hector column holding the data
+  private HColumn<CN, ByteBuffer> hColumn;
 
-
-  /**
-   * Key-value pair containing the raw data.
-   */
-  private HColumn<ByteBuffer, ByteBuffer> hColumn;
-
-  public ByteBuffer getName() {
+  @Override
+  public CN getName() {
     return hColumn.getName();
   }
 
+  public void setValue(HColumn<CN, ByteBuffer> hColumn) {
+    this.hColumn = hColumn;
+  }
+
+  protected ByteBuffer getBytes() {
+    return hColumn.getValue();
+  }
+
   /**
-   * Deserialize a String into an typed Object, according to the field schema.
+   * Deserialize byteBuffer into a typed Object, according to the field schema.
    * @see org.apache.gora.cassandra.query.CassandraColumn#getValue()
    */
+  @SuppressWarnings("rawtypes")
   public Object getValue() {
     Field field = getField();
     Schema fieldSchema = field.schema();
     Type type = fieldSchema.getType();
-    ByteBuffer byteBuffer = hColumn.getValue();
+
+    ByteBuffer byteBuffer = getBytes();
+
     if (byteBuffer == null) {
+      LOG.debug("Column " + toString() + " is null.");
       return null;
     }
+
     Object value = null;
+
     if (type == Type.ARRAY) {
       GenericArraySerializer serializer = GenericArraySerializer.get(fieldSchema.getElementType());
       GenericArray genericArray = serializer.fromByteBuffer(byteBuffer);
@@ -94,14 +96,14 @@ public class CassandraSubColumn extends CassandraColumn {
 
     return value;
   }
-  
+
   /**
    * Gets the specific schema for a union data type
    * @param pSchemaPos
    * @param pSchema
    * @return
    */
-  private Schema getUnionSchema (int pSchemaPos, Schema pSchema){
+  protected Schema getUnionSchema (int pSchemaPos, Schema pSchema){
     Schema unionSchema = pSchema.getTypes().get(pSchemaPos);
     // default union element
     if ( unionSchema == null )
@@ -109,7 +111,4 @@ public class CassandraSubColumn extends CassandraColumn {
     return unionSchema;
   }
 
-  public void setValue(HColumn<ByteBuffer, ByteBuffer> hColumn) {
-    this.hColumn = hColumn;
-  }
 }

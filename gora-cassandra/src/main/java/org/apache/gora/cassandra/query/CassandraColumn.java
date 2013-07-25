@@ -29,50 +29,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Represents a unit of data: a key value pair tagged by a family name
+ * Represents an abstract name/value pair. Column name types are generic. Values might be atomic or composed.
+ *
+ * @param CN
+ *          column name type
  */
-public abstract class CassandraColumn {
-  public static final Logger LOG = LoggerFactory.getLogger(CassandraColumn.class);
+public abstract class CassandraColumn<CN> {
+  private static final Logger LOG = LoggerFactory.getLogger(CassandraColumn.class);
 
-  public static final int SUB = 0;
-  public static final int SUPER = 1;
-  
   private String family;
   private int type;
   private Field field;
   private int unionType;
 
-  public void setUnionType(int pUnionType){
-    this.unionType = pUnionType;
-  }
+  public abstract CN getName();
 
-  public int getUnionType(){
-    return unionType;
-  }
-  
-  public String getFamily() {
-    return family;
-  }
-  public void setFamily(String family) {
-    this.family = family;
-  }
-  public int getType() {
-    return type;
-  }
-  public void setType(int type) {
-    this.type = type;
-  }
-  public void setField(Field field) {
-    this.field = field;
-  }
-  
-  protected Field getField() {
-    return this.field;
-  }
-  
-  public abstract ByteBuffer getName();
   public abstract Object getValue();
-  
+
   protected Object fromByteBuffer(Schema schema, ByteBuffer byteBuffer) {
     Object value = null;
     Serializer<?> serializer = GoraSerializerTypeInferer.getSerializer(schema);
@@ -82,6 +55,38 @@ public abstract class CassandraColumn {
       value = serializer.fromByteBuffer(byteBuffer);
     }
     return value;
+  }
+
+  public void setUnionType(int pUnionType) {
+    this.unionType = pUnionType;
+  }
+
+  public int getUnionType() {
+    return unionType;
+  }
+
+  public String getFamily() {
+    return family;
+  }
+
+  public void setFamily(String family) {
+    this.family = family;
+  }
+
+  public int getType() {
+    return type;
+  }
+
+  public void setType(int type) {
+    this.type = type;
+  }
+
+  public void setField(Field field) {
+    this.field = field;
+  }
+
+  protected Field getField() {
+    return this.field;
   }
 
 }

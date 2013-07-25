@@ -19,138 +19,163 @@
 package org.apache.gora.cassandra.query;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-import me.prettyprint.cassandra.serializers.StringSerializer;
+import me.prettyprint.hector.api.beans.DynamicComposite;
 
 import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
+import org.apache.gora.cassandra.store.CassandraKeyMapper;
 import org.apache.gora.cassandra.store.CassandraStore;
 import org.apache.gora.persistency.impl.PersistentBase;
 import org.apache.gora.query.Query;
 import org.apache.gora.query.impl.ResultBase;
-import org.apache.gora.store.DataStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CassandraResult<K, T extends PersistentBase> extends ResultBase<K, T> {
-  public static final Logger LOG = LoggerFactory.getLogger(CassandraResult.class);
-  
-  private int rowNumber;
+/**
+ * Represents the result of a cassandra query
+ *
+ * @param PK
+ *          Cassandra primary key base type
+ * @param T
+ *          persistent type
+ */
+public class CassandraResult<PK, T extends PersistentBase> extends ResultBase<PK, T> {
+  private static final Logger LOG = LoggerFactory.getLogger(CassandraResult.class);
 
-  private CassandraResultSet<K> cassandraResultSet;
-  
-  /**
-   * Maps Cassandra columns to Avro fields.
-   */
+  // pointer to current position in the result list
+  private int resultListIndex;
+
+  // the underlying result list holding slices (formerly named rows) of mixed columns
+  private CassandraResultList<PK> cassandraResultList;
+
+  // Maps Cassandra columns to Avro fields.
   private Map<String, String> reverseMap;
 
-  public CassandraResult(DataStore<K, T> dataStore, Query<K, T> query) {
+  private CassandraKeyMapper<PK, T> keyMapper;
+
+  public CassandraResult(CassandraStore<PK, T> dataStore, Query<PK, T> query) {
     super(dataStore, query);
+    this.keyMapper = dataStore.getKeyMapper();
   }
 
   @Override
   protected boolean nextInner() throws IOException {
-    if (this.rowNumber < this.cassandraResultSet.size()) {
+    if (this.resultListIndex < this.cassandraResultList.size()) {
       updatePersistent();
     }
-    ++this.rowNumber;
-    return (this.rowNumber <= this.cassandraResultSet.size());
+    ++this.resultListIndex;
+    return (this.resultListIndex <= this.cassandraResultList.size());
   }
-  
+
   /**
    * Gets the column containing the type of the union type element stored.
-   * TODO: This might seem too much of a overhead if we consider that N rows have M columns,
-   *       this might have to be reviewed to get the specific column in O(1)
+   *
+   * TODO: This might seem too much of an overhead if we consider that N slices have M columns, this
+   * might have to be reviewed to get the specific column in O(1)
+   *
    * @param pFieldName
-   * @param pCassandraRow
+   * @param pColumns
    * @return
    */
-  private CassandraColumn getUnionTypeColumn(String pFieldName, Object[] pCassandraRow){
-    
-    for (int iCnt = 0; iCnt < pCassandraRow.length; iCnt++){
-      CassandraColumn cColumn = (CassandraColumn)pCassandraRow[iCnt];
-      String columnName = StringSerializer.get().fromByteBuffer(cColumn.getName());
+  private CassandraColumn<DynamicComposite> getUnionTypeColumn(String pFieldName, CassandraColumn<DynamicComposite>[] pColumns) {
+    for (int iCnt = 0; iCnt < pColumns.length; iCnt++) {
+      CassandraColumn<DynamicComposite> cColumn = pColumns[iCnt];
+      String columnName = keyMapper.getFieldQualifier(cColumn.getName());
       if (pFieldName.equals(columnName))
         return cColumn;
     }
     return null;
   }
 
-
   /**
    * Load key/value pair from Cassandra row to Avro record.
+   *
    * @throws IOException
    */
   private void updatePersistent() throws IOException {
-    CassandraRow<K> cassandraRow = this.cassandraResultSet.get(this.rowNumber);
-    
+    CassandraMixedRow<PK> mixedResultRow = this.cassandraResultList.get(this.resultListIndex);
+
     // load key
-    this.key = cassandraRow.getKey();
-    
+    this.key = mixedResultRow.getKey();
+
     // load value
     Schema schema = this.persistent.getSchema();
     List<Field> fields = schema.getFields();
-    
-    for (CassandraColumn cassandraColumn: cassandraRow) {
-      
-      // get field name
+
+    for (CassandraColumn<DynamicComposite> cassandraColumn : mixedResultRow) {
       String family = cassandraColumn.getFamily();
-      String fieldName = this.reverseMap.get(family + ":" + StringSerializer.get().fromByteBuffer(cassandraColumn.getName()));
-      
-      if (fieldName != null ){
-        // get field
-        int pos = this.persistent.getFieldIndex(fieldName);
-        Field field = fields.get(pos);
-        Type fieldType = field.schema().getType();
-        System.out.println(StringSerializer.get().fromByteBuffer(cassandraColumn.getName()) + fieldName + " " + fieldType.name());
-        if (fieldType == Type.UNION){
-          // TODO getting UNION stored type
-          // TODO get value of UNION stored type. This field does not need to be written back to the store
-          cassandraColumn.setUnionType(getNonNullTypePos(field.schema().getTypes()));
-        }
+      DynamicComposite columnName = cassandraColumn.getName();
+      String qualifier = keyMapper.getFieldQualifier(columnName);
+      String fieldName = this.reverseMap.get(family + ":" + qualifier);
 
-        // get value
-        cassandraColumn.setField(field);
-        Object value = cassandraColumn.getValue();
-
-        this.persistent.put(pos, value);
-        // this field does not need to be written back to the store
-        this.persistent.clearDirty(pos);
+      // filter columns with respect to query fields
+      // TODO look for some way to filter natively at query execution time
+      if (fieldName == null) {
+        continue;
       }
-      else
-        LOG.debug("FieldName was null while iterating CassandraRow and using Avro Union type");
+
+      // get field
+      int pos = this.persistent.getFieldIndex(fieldName);
+      Field field = fields.get(pos);
+
+      if (field == null) {
+        LOG.debug("Field with name '" + fieldName + "' could not be matched to schema field.");
+        return;
+      }
+
+      Type fieldType = field.schema().getType();
+
+      if (fieldType == Type.UNION) {
+        // TODO getting UNION stored type
+        // TODO get value of UNION stored type. This field does not need to be written back to the
+        // store
+        cassandraColumn.setUnionType(getNonNullTypePos(field.schema().getTypes()));
+      }
+
+      // get value
+      cassandraColumn.setField(field);
+      Object value = cassandraColumn.getValue();
+
+      // adjust value schema
+
+      this.persistent.put(pos, value);
+      // this field does not need to be written back to the store
+      this.persistent.clearDirty(pos);
     }
 
   }
 
-  private int getNonNullTypePos(List<Schema> pTypes){
+  // TODO review UNION handling
+  private int getNonNullTypePos(List<Schema> pTypes) {
     int iCnt = 0;
-    for (Schema sch :  pTypes)
+    for (Schema sch : pTypes)
       if (!sch.getName().equals("null"))
         return iCnt;
-      else 
+      else
         iCnt++;
     return CassandraStore.DEFAULT_UNION_SCHEMA;
   }
 
   @Override
   public void close() throws IOException {
-    // TODO Auto-generated method stub
-    
   }
 
   @Override
   public float getProgress() throws IOException {
-    return (((float) this.rowNumber) / this.cassandraResultSet.size());
+    return (((float) this.resultListIndex) / this.cassandraResultList.size());
   }
 
-  public void setResultSet(CassandraResultSet<K> cassandraResultSet) {
-    this.cassandraResultSet = cassandraResultSet;
+  public void setResultSet(CassandraResultList<PK> cassandraResultList) {
+    this.cassandraResultList = cassandraResultList;
   }
-  
+
   public void setReverseMap(Map<String, String> reverseMap) {
     this.reverseMap = reverseMap;
   }
