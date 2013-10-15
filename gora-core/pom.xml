@@ -107,10 +107,6 @@
 
     <dependencies>
         <!-- Hadoop Dependencies -->
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-core</artifactId>
-        </dependency>
         
         <dependency>
             <groupId>org.apache.cxf</groupId>
@@ -157,7 +153,12 @@
             <artifactId>hadoop-test</artifactId>
             <scope>test</scope>
         </dependency>
-        
+
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-core</artifactId>
+            <version>1.0.4</version>
+        </dependency>
     </dependencies>
 
 </project>
