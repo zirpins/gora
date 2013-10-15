@@ -296,7 +296,7 @@ public class CassandraKeyMapper<PK, T extends PersistentBase> {
     // if not a row scan return keys as they are
     if (!isCassandraRowScan(startKey, endKey)) {
       result.put(startKey, endKey);
-      LOG.warn("The keys do not specify a partition key range. A single partition will be returned.");
+      LOG.info("The keys do not specify a partition key range. A single partition will be returned.");
       return result;
     }
 
