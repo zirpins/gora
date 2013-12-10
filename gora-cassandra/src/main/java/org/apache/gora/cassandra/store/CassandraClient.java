@@ -24,6 +24,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import me.prettyprint.cassandra.connection.DynamicLoadBalancingPolicy;
+import me.prettyprint.cassandra.connection.LeastActiveBalancingPolicy;
+import me.prettyprint.cassandra.connection.RoundRobinBalancingPolicy;
 import me.prettyprint.cassandra.model.ConfigurableConsistencyLevel;
 import me.prettyprint.cassandra.serializers.ByteBufferSerializer;
 import me.prettyprint.cassandra.serializers.DynamicCompositeSerializer;
@@ -65,6 +68,8 @@ public class CassandraClient<PK, T extends PersistentBase> {
   private static final String FIELD_SCAN_COLUMN_RANGE_DELIMITER_START = "!";
   private static final String FIELD_SCAN_COLUMN_RANGE_DELIMITER_END = "~";
 
+  private static final HConsistencyLevel DEFAULT_CONSISTENCY_LEVEL = HConsistencyLevel.ONE;
+
   // define types of queries possible
   private enum CassandraQueryType {
     SINGLE, ROWSCAN, COLUMNSCAN, MULTISCAN, ROWSCAN_PRIMITIVE, SINGLE_PRIMITIVE;
@@ -98,8 +103,21 @@ public class CassandraClient<PK, T extends PersistentBase> {
     // get cassandra mapping with persistent class
     this.cassandraMapping = CassandraMappingManager.getManager().get(persistentClass);
 
+    // set up host configurator with client-side load balancing
+    CassandraHostConfigurator hostConf = new CassandraHostConfigurator(this.cassandraMapping.getHostName());
+    if (this.cassandraMapping.isAutoDiscovery())
+      hostConf.setAutoDiscoverHosts(true);
+    if (this.cassandraMapping.getLoadBalancingPolicy() != null) {
+      if (this.cassandraMapping.getLoadBalancingPolicy().equals("LeastActiveBalancingPolicy"))
+        hostConf.setLoadBalancingPolicy(new LeastActiveBalancingPolicy());
+      else if (this.cassandraMapping.getLoadBalancingPolicy().equals("RoundRobinBalancingPolicy"))
+        hostConf.setLoadBalancingPolicy(new RoundRobinBalancingPolicy());
+      else if (this.cassandraMapping.getLoadBalancingPolicy().equals("DynamicLoadBalancingPolicy"))
+        hostConf.setLoadBalancingPolicy(new DynamicLoadBalancingPolicy());
+    }
+
     // init hector represetation of cassandra cluster
-    this.cluster = HFactory.getOrCreateCluster(this.cassandraMapping.getClusterName(), new CassandraHostConfigurator(this.cassandraMapping.getHostName()));
+    this.cluster = HFactory.getOrCreateCluster(this.cassandraMapping.getClusterName(), hostConf);
 
     // add keyspace to cluster
     checkKeyspace();
@@ -108,7 +126,7 @@ public class CassandraClient<PK, T extends PersistentBase> {
     ConfigurableConsistencyLevel configurableConsistencyLevel = new ConfigurableConsistencyLevel();
     Map<String, HConsistencyLevel> clmap = new HashMap<String, HConsistencyLevel>();
     for (String familyName : this.cassandraMapping.getFamilies())
-      clmap.put(familyName, HConsistencyLevel.ONE);
+      clmap.put(familyName, DEFAULT_CONSISTENCY_LEVEL);
     configurableConsistencyLevel.setReadCfConsistencyLevels(clmap);
     configurableConsistencyLevel.setWriteCfConsistencyLevels(clmap);
 

@@ -44,7 +44,9 @@ public class CassandraMapping {
   private static final String FAMILY_ATTRIBUTE = "family";
   private static final String CLUSTER_ATTRIBUTE = "cluster";
   private static final String HOST_ATTRIBUTE = "host";
+  private static final String AUTO_DISCOVERY_ATTRIBUTE = "autoDiscovery";
   private static final String TYPE_ATTRIBUTE = "type";
+  private static final String LOAD_BALANCING_ATTRIBUTE = "loadBalancingPolicy";
   private static final String REPLICATION_FACTOR_ATTRIBUTE = "replicationFactor";
   private static final String REPLICATION_STRATEGY_ATTRIBUTE = "replicationStrategy";
   private static final String KEYCLASS_ATTRIBUTE = "keyClass";
@@ -58,6 +60,8 @@ public class CassandraMapping {
 
   // cassandra server attributes
   private String hostName;
+  private boolean autoDiscovery;
+  private String loadBalancingPolicy;
   private String clusterName;
   private String keyspaceName;
   private String replicationFactor = "1";
@@ -66,7 +70,6 @@ public class CassandraMapping {
   // key mapping attributes
   private String keyClassName;
   private boolean keyMapping = false;
-
 
   /**
    * List of the super column families.
@@ -86,8 +89,7 @@ public class CassandraMapping {
   /**
    * Look up the column family from its name.
    */
-  private Map<String, BasicColumnFamilyDefinition> columnFamilyDefinitions =
-		  new HashMap<String, BasicColumnFamilyDefinition>();
+  private Map<String, BasicColumnFamilyDefinition> columnFamilyDefinitions = new HashMap<String, BasicColumnFamilyDefinition>();
 
   /**
    * field <code>rowKeyFieldsList</code> holds ordered list of row key parts
@@ -111,6 +113,7 @@ public class CassandraMapping {
 
   /**
    * Simply gets the Cassandra host name.
+   *
    * @return hostName
    */
   public String getHostName() {
@@ -118,9 +121,27 @@ public class CassandraMapping {
   }
 
   /**
-   * Simply gets the Cassandra cluster (the machines (nodes)
-   * in a logical Cassandra instance) name.
+   * Simply gets the Cassandra auto discovery flag.
+   *
+   * @return hostName
+   */
+  public boolean isAutoDiscovery() {
+    return this.autoDiscovery;
+  }
+
+  /**
+   * Simply gets the Cassandra loadBalancingPolicy.
+   *
+   * @return hostName
+   */
+  public String getLoadBalancingPolicy() {
+    return this.loadBalancingPolicy;
+  }
+
+  /**
+   * Simply gets the Cassandra cluster (the machines (nodes) in a logical Cassandra instance) name.
    * Clusters can contain multiple keyspaces.
+   *
    * @return clusterName
    */
   public String getClusterName() {
@@ -129,6 +150,7 @@ public class CassandraMapping {
 
   /**
    * Simply gets the Cassandra namespace for ColumnFamilies, typically one per application
+   *
    * @return
    */
   public String getKeyspaceName() {
@@ -172,10 +194,9 @@ public class CassandraMapping {
   }
 
   /**
-   * Primary class for loading Cassandra configuration from the 'MAPPING_FILE'.
-   * It should be noted that should the "qualifier" attribute and its associated
-   * value be absent from class field definition, it will automatically be set to
-   * the field name value.
+   * Primary class for loading Cassandra configuration from the 'MAPPING_FILE'. It should be noted
+   * that should the "qualifier" attribute and its associated value be absent from class field
+   * definition, it will automatically be set to the field name value.
    *
    */
   @SuppressWarnings("unchecked")
@@ -190,7 +211,7 @@ public class CassandraMapping {
     }
     this.keyspaceName = keyspace.getAttributeValue(NAME_ATTRIBUTE);
     if (this.keyspaceName == null) {
-    	LOG.error("Error locating Cassandra Keyspace name attribute!");
+      LOG.error("Error locating Cassandra Keyspace name attribute!");
     } else {
       if (LOG.isDebugEnabled()) {
         LOG.debug("Located Cassandra Keyspace name: '" + keyspaceName + "'");
@@ -198,7 +219,7 @@ public class CassandraMapping {
     }
     this.clusterName = keyspace.getAttributeValue(CLUSTER_ATTRIBUTE);
     if (this.clusterName == null) {
-    	LOG.error("Error locating Cassandra Keyspace cluster attribute!");
+      LOG.error("Error locating Cassandra Keyspace cluster attribute!");
     } else {
       if (LOG.isDebugEnabled()) {
         LOG.debug("Located Cassandra Keyspace cluster: '" + clusterName + "'");
@@ -206,10 +227,24 @@ public class CassandraMapping {
     }
     this.hostName = keyspace.getAttributeValue(HOST_ATTRIBUTE);
     if (this.hostName == null) {
-    	LOG.error("Error locating Cassandra Keyspace host attribute!");
+      LOG.error("Error locating Cassandra Keyspace host attribute!");
     } else {
       if (LOG.isDebugEnabled()) {
         LOG.debug("Located Cassandra Keyspace host: '" + hostName + "'");
+      }
+    }
+    if (keyspace.getAttributeValue(AUTO_DISCOVERY_ATTRIBUTE) == null) {
+      LOG.warn("Cassandra Keyspace auto discovery attribute not configured!");
+    } else {
+      this.autoDiscovery = Boolean.valueOf(keyspace.getAttributeValue(AUTO_DISCOVERY_ATTRIBUTE));
+      LOG.debug("Set Cassandra Keyspace autodiscovery: '" + this.autoDiscovery + "'");
+    }
+    this.loadBalancingPolicy = keyspace.getAttributeValue(LOAD_BALANCING_ATTRIBUTE);
+    if (this.loadBalancingPolicy == null) {
+      LOG.warn("Locating Cassandra Keyspace load balancing policy attribute not configured!");
+    } else {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Located Cassandra Keyspace load balancing policy: '" + loadBalancingPolicy + "'");
       }
     }
     String _replicationFactor = keyspace.getAttributeValue(REPLICATION_FACTOR_ATTRIBUTE);
@@ -245,16 +280,16 @@ public class CassandraMapping {
 
     // load column family definitions
     List<Element> elements = keyspace.getChildren();
-    for (Element element: elements) {
+    for (Element element : elements) {
       BasicColumnFamilyDefinition cfDef = new BasicColumnFamilyDefinition();
 
       String familyName = element.getAttributeValue(NAME_ATTRIBUTE);
       if (familyName == null) {
-      	LOG.error("Error locating column family name attribute!");
-      	continue;
+        LOG.error("Error locating column family name attribute!");
+        continue;
       } else {
         if (LOG.isDebugEnabled()) {
-          LOG.debug("Located column family: '" + familyName + "'" );
+          LOG.debug("Located column family: '" + familyName + "'");
         }
       }
       String superAttribute = element.getAttributeValue(TYPE_ATTRIBUTE);
@@ -287,7 +322,7 @@ public class CassandraMapping {
 
       this.columnFamilyDefinitions.put(familyName, cfDef);
 
-    }//for
+    }// for
 
     // load key mapping definition
     if (primaryKey == null) {
@@ -329,12 +364,12 @@ public class CassandraMapping {
 
     // load column definitions
     elements = mapping.getChildren();
-    for (Element element: elements) {
+    for (Element element : elements) {
       String fieldName = element.getAttributeValue(NAME_ATTRIBUTE);
       String familyName = element.getAttributeValue(FAMILY_ATTRIBUTE);
       String columnName = element.getAttributeValue(COLUMN_ATTRIBUTE);
       if (fieldName == null) {
-       LOG.error("Field name is not declared.");
+        LOG.error("Field name is not declared.");
         continue;
       }
       if (familyName == null) {
@@ -354,16 +389,17 @@ public class CassandraMapping {
       this.familyMap.put(fieldName, familyName);
       this.columnMap.put(fieldName, columnName);
 
-    }//for
+    }// for
   }
 
   /**
    * Add new column to CassandraMapping using the self-explanatory parameters
+   *
    * @param pFamilyName
    * @param pFieldName
    * @param pColumnName
    */
-  public void addColumn(String pFamilyName, String pFieldName, String pColumnName){
+  public void addColumn(String pFamilyName, String pFieldName, String pColumnName) {
     this.familyMap.put(pFieldName, pFamilyName);
     this.columnMap.put(pFieldName, pColumnName);
   }
@@ -382,7 +418,9 @@ public class CassandraMapping {
 
   /**
    * Read family super attribute.
-   * @param family the family name
+   *
+   * @param family
+   *          the family name
    * @return true is the family is a super column family
    */
   public boolean isSuper(String family) {
@@ -391,7 +429,7 @@ public class CassandraMapping {
 
   public List<ColumnFamilyDefinition> getColumnFamilyDefinitions() {
     List<ColumnFamilyDefinition> list = new ArrayList<ColumnFamilyDefinition>();
-    for (String key: this.columnFamilyDefinitions.keySet()) {
+    for (String key : this.columnFamilyDefinitions.keySet()) {
       ColumnFamilyDefinition columnFamilyDefinition = this.columnFamilyDefinitions.get(key);
       ThriftCfDef thriftCfDef = new ThriftCfDef(columnFamilyDefinition);
       list.add(thriftCfDef);
