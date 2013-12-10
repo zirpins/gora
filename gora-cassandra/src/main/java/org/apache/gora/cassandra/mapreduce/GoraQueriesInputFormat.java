@@ -3,9 +3,7 @@ package org.apache.gora.cassandra.mapreduce;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
-import org.apache.gora.mapreduce.GoraInputFormat;
 import org.apache.gora.mapreduce.GoraInputSplit;
 import org.apache.gora.mapreduce.GoraMapReduceUtils;
 import org.apache.gora.mapreduce.GoraRecordReader;
@@ -13,11 +11,8 @@ import org.apache.gora.persistency.Persistent;
 import org.apache.gora.persistency.impl.PersistentBase;
 import org.apache.gora.query.PartitionQuery;
 import org.apache.gora.query.Query;
-import org.apache.gora.query.impl.FileSplitPartitionQuery;
 import org.apache.gora.query.impl.PartitionQueryImpl;
 import org.apache.gora.store.DataStore;
-import org.apache.gora.store.FileBackedDataStore;
-import org.apache.gora.util.IOUtils;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapreduce.InputFormat;
@@ -26,7 +21,8 @@ import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
-import org.apache.hadoop.mapreduce.lib.input.FileSplit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Extended GoraInputFormat allowing to feed an arbitrary query set into a mapred job.
@@ -35,23 +31,16 @@ import org.apache.hadoop.mapreduce.lib.input.FileSplit;
  *
  * @author Christian Zirpins (c.zirpins@seeburger.de)
  */
-public class GoraQuerySetInputFormat<K, T extends PersistentBase> extends InputFormat<K, T> implements Configurable {
+public class GoraQueriesInputFormat<K, T extends PersistentBase> extends InputFormat<K, T> implements Configurable {
+  private static final Logger LOG = LoggerFactory.getLogger(GoraQueriesInputFormat.class);
 
-  public static final String QUERYSET_KEY = "gora.inputformat.queryset";
+  public static final String QUERIES_KEY = "gora.inputformat.queries";
+
+  private static boolean reuseSerializationObjects;
 
   private Configuration conf;
 
-  private Set<Query<K, T>> querySet;
-
-  @SuppressWarnings({ "rawtypes" })
-  private void setInputPath(PartitionQuery<K, T> partitionQuery, TaskAttemptContext context) throws IOException {
-    // if the data store is file based
-    if (partitionQuery instanceof FileSplitPartitionQuery) {
-      FileSplit split = ((FileSplitPartitionQuery<K, T>) partitionQuery).getSplit();
-      // set the input path to FileSplit's path.
-      ((FileBackedDataStore) partitionQuery.getDataStore()).setInputPath(split.getPath().toString());
-    }
-  }
+  private Query<K, T>[] queries;
 
   /**
    * @see org.apache.hadoop.mapreduce.InputFormat#createRecordReader(org.apache.hadoop.mapreduce.InputSplit,
@@ -60,24 +49,26 @@ public class GoraQuerySetInputFormat<K, T extends PersistentBase> extends InputF
   @Override
   @SuppressWarnings("unchecked")
   public RecordReader<K, T> createRecordReader(InputSplit split, TaskAttemptContext context) throws IOException, InterruptedException {
+    LOG.debug("Creating record reader from Split with query:" + ((GoraInputSplit) split).getQuery());
     PartitionQuery<K, T> partitionQuery = (PartitionQuery<K, T>) ((GoraInputSplit) split).getQuery();
-    setInputPath(partitionQuery, context);
     return new GoraRecordReader<K, T>(partitionQuery, context);
   }
 
   /**
-   * This splitter generates splits for each query of the set. It does not consider
-   * partitionQueries.
+   * This splitter generates splits for each query of the set. It does not consider partitionQueries
+   * that are created by the datastore
    *
    * @see org.apache.hadoop.mapreduce.InputFormat#getSplits(org.apache.hadoop.mapreduce.JobContext)
    */
   @Override
   public List<InputSplit> getSplits(JobContext context) throws IOException, InterruptedException {
     List<InputSplit> splits = new ArrayList<InputSplit>();
-    for (Query<K, T> baseQuery : querySet) {
-      PartitionQuery<K, T> partQuery = new PartitionQueryImpl<K, T>(baseQuery);
-      splits.add(new GoraInputSplit(context.getConfiguration(), partQuery));
+    for (Query<K, T> baseQuery : queries) {
+      PartitionQueryImpl<K, T> partQuery = new PartitionQueryImpl<K, T>(baseQuery, baseQuery.getStartKey(), baseQuery.getEndKey());
+      GoraInputSplit split = new GoraInputSplit(context.getConfiguration(), partQuery);
+      splits.add(split);
     }
+    LOG.debug("Created " + splits.size() + " input splits");
     return splits;
   }
 
@@ -96,7 +87,7 @@ public class GoraQuerySetInputFormat<K, T extends PersistentBase> extends InputF
   public void setConf(Configuration conf) {
     this.conf = conf;
     try {
-      this.querySet = getQuerySet(conf);
+      this.queries = getQueries(conf);
     } catch (Exception ex) {
       throw new RuntimeException(ex);
     }
@@ -107,8 +98,8 @@ public class GoraQuerySetInputFormat<K, T extends PersistentBase> extends InputF
    * @param queries
    * @throws IOException
    */
-  public static <K, T extends Persistent> void setQuerySet(Job job, Set<Query<K, T>> queries) throws IOException {
-    IOUtils.storeToConf(queries, job.getConfiguration(), QUERYSET_KEY);
+  public static <K, T extends Persistent> void setQueries(Job job, Query<K, T>[] queries) throws IOException {
+    ExtendedIOUtils.storeArrayToConf(queries, job.getConfiguration(), QUERIES_KEY);
   }
 
   /**
@@ -116,8 +107,8 @@ public class GoraQuerySetInputFormat<K, T extends PersistentBase> extends InputF
    * @return
    * @throws IOException
    */
-  public Set<Query<K, T>> getQuerySet(Configuration conf) throws IOException {
-    return IOUtils.loadFromConf(conf, QUERYSET_KEY);
+  public Query<K, T>[] getQueries(Configuration conf) throws IOException {
+    return ExtendedIOUtils.loadArrayFromConf(conf, QUERIES_KEY);
   }
 
   /**
@@ -131,8 +122,8 @@ public class GoraQuerySetInputFormat<K, T extends PersistentBase> extends InputF
    *          whether to reuse objects in serialization
    * @throws IOException
    */
-  public static <K1, V1 extends Persistent> void setInput(Job job, Set<Query<K1, V1>> querySet, boolean reuseObjects) throws IOException {
-    setInput(job, querySet, querySet.iterator().next().getDataStore(), reuseObjects);
+  public static <K1, V1 extends Persistent> void setInput(Job job, Query<K1, V1>[] queries, boolean reuseObjects) throws IOException {
+    setInput(job, queries, queries[0].getDataStore(), reuseObjects);
   }
 
   /**
@@ -148,14 +139,18 @@ public class GoraQuerySetInputFormat<K, T extends PersistentBase> extends InputF
    *          whether to reuse objects in serialization
    * @throws IOException
    */
-  public static <K1, V1 extends Persistent> void setInput(Job job, Set<Query<K1, V1>> querySet, DataStore<K1, V1> dataStore, boolean reuseObjects)
+  public static <K1, V1 extends Persistent> void setInput(Job job, Query<K1, V1>[] queries, DataStore<K1, V1> dataStore, boolean reuseObjects)
       throws IOException {
+
+    GoraQueriesInputFormat.reuseSerializationObjects = reuseObjects;
 
     Configuration conf = job.getConfiguration();
 
-    GoraMapReduceUtils.setIOSerializations(conf, reuseObjects);
+    GoraMapReduceUtils.setIOSerializations(conf, GoraQueriesInputFormat.reuseSerializationObjects);
 
-    job.setInputFormatClass(GoraInputFormat.class);
-    GoraQuerySetInputFormat.setQuerySet(job, querySet);
+    job.setInputFormatClass(GoraQueriesInputFormat.class);
+    GoraQueriesInputFormat.setQueries(job, queries);
+
+    LOG.debug("SetInput with " + queries.length + " queries.");
   }
 }
