@@ -36,6 +36,8 @@ public class GoraQueriesInputFormat<K, T extends PersistentBase> extends InputFo
 
   public static final String QUERIES_KEY = "gora.inputformat.queries";
 
+  private static final boolean DEBUG = false;
+
   private static boolean reuseSerializationObjects;
 
   private Configuration conf;
@@ -49,7 +51,8 @@ public class GoraQueriesInputFormat<K, T extends PersistentBase> extends InputFo
   @Override
   @SuppressWarnings("unchecked")
   public RecordReader<K, T> createRecordReader(InputSplit split, TaskAttemptContext context) throws IOException, InterruptedException {
-    LOG.debug("Creating record reader from Split with query:" + ((GoraInputSplit) split).getQuery());
+    if (DEBUG)
+      LOG.debug("Creating record reader from Split with query:" + ((GoraInputSplit) split).getQuery());
     PartitionQuery<K, T> partitionQuery = (PartitionQuery<K, T>) ((GoraInputSplit) split).getQuery();
     return new GoraRecordReader<K, T>(partitionQuery, context);
   }
@@ -68,7 +71,8 @@ public class GoraQueriesInputFormat<K, T extends PersistentBase> extends InputFo
       GoraInputSplit split = new GoraInputSplit(context.getConfiguration(), partQuery);
       splits.add(split);
     }
-    LOG.debug("Created " + splits.size() + " input splits");
+    if (DEBUG)
+      LOG.debug("Created " + splits.size() + " input splits");
     return splits;
   }
 
@@ -151,6 +155,7 @@ public class GoraQueriesInputFormat<K, T extends PersistentBase> extends InputFo
     job.setInputFormatClass(GoraQueriesInputFormat.class);
     GoraQueriesInputFormat.setQueries(job, queries);
 
-    LOG.debug("SetInput with " + queries.length + " queries.");
+    if (DEBUG)
+      LOG.debug("SetInput with " + queries.length + " queries.");
   }
 }
