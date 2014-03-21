@@ -107,6 +107,17 @@ public class GoraQueriesInputFormat<K, T extends PersistentBase> extends InputFo
   }
 
   /**
+   * Add query declarations to any {@link org.apache.hadoop.conf.Configuration} independent from a {@link org.apache.hadoop.mapreduce.Job}.
+   * 
+   * @param conf
+   * @param queries
+   * @throws IOException
+   */
+  public static <K, T extends Persistent> void setQueries(Configuration conf, Query<K, T>[] queries) throws IOException {
+    ExtendedIOUtils.storeArrayToConf(queries, conf, QUERIES_KEY);
+  }
+	
+  /**
    * @param conf
    * @return
    * @throws IOException
